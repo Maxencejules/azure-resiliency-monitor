@@ -13,13 +13,29 @@ public class HealthCheckService : IHealthCheckService
     public HealthCheckService(ILogger<HealthCheckService> logger)
     {
         _logger = logger;
+        _monitoredResources = new List<string>();
         
-        // TODO: Load from configuration
-        _monitoredResources = new List<string>
+        // Load from configuration
+        var resourcesConfig = Environment.GetEnvironmentVariable("MonitoredResources");
+        if (!string.IsNullOrEmpty(resourcesConfig))
         {
-            // Add your actual Azure resource IDs here
-            // Format: /subscriptions/{id}/resourceGroups/{rg}/providers/Microsoft.Web/sites/{name}
-        };
+            var resources = resourcesConfig.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            _monitoredResources.AddRange(resources);
+            _logger.LogInformation("Loaded {Count} resources from configuration", resources.Length);
+        }
+        
+        // Add mock resources if in development mode
+        var isDevelopment = Environment.GetEnvironmentVariable("AZURE_FUNCTIONS_ENVIRONMENT") == "Development";
+        if (isDevelopment && !_monitoredResources.Any())
+        {
+            _monitoredResources.AddRange(new[]
+            {
+                "mock://subscription/test-sub/resourceGroups/test-rg/providers/Microsoft.Web/sites/app-1",
+                "mock://subscription/test-sub/resourceGroups/test-rg/providers/Microsoft.Web/sites/app-2",
+                "mock://subscription/test-sub/resourceGroups/test-rg/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-1"
+            });
+            _logger.LogInformation("Added {Count} mock resources for development", _monitoredResources.Count);
+        }
     }
 
     public void RegisterMonitor(IServiceMonitor monitor)
@@ -44,16 +60,36 @@ public class HealthCheckService : IHealthCheckService
 
     public async Task<HealthCheckResult> CheckServiceAsync(string resourceId, CancellationToken cancellationToken = default)
     {
+        // For mock resources, always use the first registered monitor
+        if (resourceId.StartsWith("mock://"))
+        {
+            var monitor = _monitors.Values.FirstOrDefault();
+            if (monitor != null)
+            {
+                var result = await monitor.CheckHealthAsync(resourceId, cancellationToken);
+                
+                if (result.Status == HealthStatus.Unhealthy)
+                {
+                    _logger.LogWarning("Service {ResourceId} is unhealthy, attempting recovery", resourceId);
+                    var recovered = await monitor.AttemptRecoveryAsync(resourceId, cancellationToken);
+                    result.Metadata["recoveryAttempted"] = recovered;
+                }
+                
+                return result;
+            }
+        }
+        
+        // Original code for real resources
         var serviceType = DetermineServiceType(resourceId);
         
-        if (_monitors.TryGetValue(serviceType, out var monitor))
+        if (_monitors.TryGetValue(serviceType, out var realMonitor))
         {
-            var result = await monitor.CheckHealthAsync(resourceId, cancellationToken);
+            var result = await realMonitor.CheckHealthAsync(resourceId, cancellationToken);
             
             if (result.Status == HealthStatus.Unhealthy)
             {
                 _logger.LogWarning("Service {ResourceId} is unhealthy, attempting recovery", resourceId);
-                var recovered = await monitor.AttemptRecoveryAsync(resourceId, cancellationToken);
+                var recovered = await realMonitor.AttemptRecoveryAsync(resourceId, cancellationToken);
                 result.Metadata["recoveryAttempted"] = recovered;
             }
             

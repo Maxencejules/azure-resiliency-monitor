@@ -1,9 +1,9 @@
 {
   "IsEncrypted": false,
   "Values": {
-    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "AzureWebJobsStorage": "",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
-    "SubscriptionId": "your-subscription-id",
-    "ResourceGroup": "your-resource-group"
+    "AZURE_FUNCTIONS_ENVIRONMENT": "Development",
+    "MonitoredResources": ""
   }
 }

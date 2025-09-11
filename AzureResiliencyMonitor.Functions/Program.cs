@@ -13,6 +13,7 @@ var host = new HostBuilder()
         
         // Register monitors
         services.AddSingleton<AppServiceMonitor>();
+        services.AddSingleton<MockServiceMonitor>();
         
         // Register health check service
         services.AddSingleton<IHealthCheckService, HealthCheckService>(provider =>
@@ -20,8 +21,17 @@ var host = new HostBuilder()
             var service = new HealthCheckService(
                 provider.GetRequiredService<ILogger<HealthCheckService>>());
             
-            // Register all monitors
-            service.RegisterMonitor(provider.GetRequiredService<AppServiceMonitor>());
+            // Check if we should use mock monitor
+            var isDevelopment = Environment.GetEnvironmentVariable("AZURE_FUNCTIONS_ENVIRONMENT") == "Development";
+            
+            if (isDevelopment)
+            {
+                service.RegisterMonitor(provider.GetRequiredService<MockServiceMonitor>());
+            }
+            else
+            {
+                service.RegisterMonitor(provider.GetRequiredService<AppServiceMonitor>());
+            }
             
             return service;
         });
