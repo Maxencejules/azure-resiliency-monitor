@@ -1,0 +1,33 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      # The Functions SDK generates/restores its extension project in this direct restore.
+      - run: dotnet restore AzureResiliencyMonitor.Functions/AzureResiliencyMonitor.Functions.csproj
+      - run: dotnet restore AzureResiliencyMonitor.sln
+      - run: dotnet build AzureResiliencyMonitor.sln --no-restore --configuration Release
+      - run: dotnet test AzureResiliencyMonitor.sln --no-build --no-restore --configuration Release
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build

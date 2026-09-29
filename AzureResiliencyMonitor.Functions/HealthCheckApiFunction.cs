@@ -28,7 +28,7 @@ public class HealthCheckApiFunction
     {
         _logger.LogInformation("Getting current health status");
         
-        var results = await _healthCheckService.CheckAllServicesAsync();
+        var results = _healthCheckService.GetCurrentHealth();
         
         var response = req.CreateResponse(HttpStatusCode.OK);
         response.Headers.Add("Content-Type", "application/json");

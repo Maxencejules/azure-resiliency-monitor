@@ -10,21 +10,7 @@ public class HealthCheckResult
     public DateTime CheckedAt { get; set; }
     public Dictionary<string, object> Metadata { get; set; } = new();
     public TimeSpan ResponseTime { get; set; }
+    public double ResponseTimeMs => ResponseTime.TotalMilliseconds;
 }
-
-public enum ServiceType
-{
-    AppService,
-    FunctionApp,
-    CosmosDB,
-    ServiceBus,
-    StorageAccount
-}
-
-public enum HealthStatus
-{
-    Healthy,
-    Degraded,
-    Unhealthy,
-    Unknown
-}
+public enum ServiceType { AppService, FunctionApp, CosmosDB, ServiceBus, StorageAccount }
+public enum HealthStatus { Healthy, Degraded, Unhealthy, Unknown }

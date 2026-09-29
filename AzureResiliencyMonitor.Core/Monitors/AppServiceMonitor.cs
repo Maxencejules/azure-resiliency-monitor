@@ -18,9 +18,14 @@ public class AppServiceMonitor : IServiceMonitor
     public ServiceType ServiceType => ServiceType.AppService;
 
     public AppServiceMonitor(ILogger<AppServiceMonitor> logger)
+        : this(logger, new ArmClient(new DefaultAzureCredential()))
+    {
+    }
+
+    public AppServiceMonitor(ILogger<AppServiceMonitor> logger, ArmClient armClient)
     {
         _logger = logger;
-        _armClient = new ArmClient(new DefaultAzureCredential());
+        _armClient = armClient ?? throw new ArgumentNullException(nameof(armClient));
     }
 
     public async Task<HealthCheckResult> CheckHealthAsync(string resourceId, CancellationToken cancellationToken = default)
@@ -28,7 +33,7 @@ public class AppServiceMonitor : IServiceMonitor
         var stopwatch = Stopwatch.StartNew();
         var result = new HealthCheckResult
         {
-            ServiceName = "App Service",
+            ServiceName = resourceId.TrimEnd('/').Split('/').Last(),
             ResourceId = resourceId,
             ServiceType = ServiceType.AppService,
             CheckedAt = DateTime.UtcNow
@@ -38,6 +43,9 @@ public class AppServiceMonitor : IServiceMonitor
         {
             var resource = _armClient.GetWebSiteResource(new ResourceIdentifier(resourceId));
             var webSite = await resource.GetAsync(cancellationToken);
+
+            var name = webSite.Value.Data.Name;
+            if (!string.IsNullOrWhiteSpace(name)) result.ServiceName = name;
             
             result.Status = webSite.Value.Data.State == "Running" 
                 ? HealthStatus.Healthy 
@@ -83,6 +91,8 @@ public class AppServiceMonitor : IServiceMonitor
         }
         catch (Exception ex)
         {
+            if (ex is OperationCanceledException && cancellationToken.IsCancellationRequested)
+                throw;
             _logger.LogError(ex, "Recovery failed for {ResourceId}", resourceId);
             return false;
         }

@@ -19,13 +19,14 @@ public class HealthCheckFunction
 
     [Function("HealthCheckTimer")]
     public async Task RunAsync(
-        [TimerTrigger("0 */1 * * * *", RunOnStartup = true, UseMonitor = false)] TimerInfo timerInfo)
+        [TimerTrigger("0 */1 * * * *")] TimerInfo timerInfo,
+        CancellationToken cancellationToken)
     {
         _logger.LogInformation("Health check timer triggered at: {time}", DateTime.UtcNow);
         
         try
         {
-            var results = await _healthCheckService.CheckAllServicesAsync();
+            var results = await _healthCheckService.CheckAllServicesAsync(cancellationToken);
             
             foreach (var result in results)
             {
@@ -40,6 +41,10 @@ public class HealthCheckFunction
             {
                 _logger.LogInformation("No services configured for monitoring yet");
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
