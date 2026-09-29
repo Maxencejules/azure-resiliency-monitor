@@ -6,5 +6,13 @@ export interface HealthCheckResult {
     message: string;
     checkedAt: string;
     responseTime: string;
-    metadata: Record<string, any>;
+    responseTimeMs: number;
+    metadata: Record<string, unknown> & {
+        cpuUsage?: number;
+        memoryUsage?: number;
+        recoveryOutcome?: 'NotNeeded' | 'Disabled' | 'Cooldown' | 'Started' | 'Failed' | 'Unsupported';
+        recoveryAttempted?: boolean;
+        recoverySucceeded?: boolean;
+        nextRecoveryAt?: string;
+    };
 }

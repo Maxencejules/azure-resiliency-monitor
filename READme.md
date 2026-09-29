@@ -1,276 +1,163 @@
 # Azure Resiliency Monitor
 
-A full-stack monitoring solution for Azure services with automated health checks, recovery actions, and real-time dashboard visualization.
+A portfolio demonstration of scheduled Azure App Service monitoring, controlled
+restart requests, and a React dashboard. Deterministic mock resources and frontend
+demo scenarios let you explore it without an Azure subscription.
 
-## 🎯 Overview
+The real monitor reads an App Service's **ARM running state**. It does not probe
+application HTTP health or collect CPU/memory metrics; demo metrics are synthetic.
+Cosmos DB, Service Bus, Storage, and Function App monitors are extension ideas,
+not implemented Azure integrations.
 
-This project demonstrates enterprise-level monitoring patterns for Azure services, featuring automatic recovery capabilities and a responsive real-time dashboard. Built with configuration-driven design principles, it supports both mock services for development and real Azure resources for production.
+## Quick start: dashboard demonstration
 
-## ✨ Features
+Requires Node.js 24+. From a clean clone:
 
-- **Real-time Health Monitoring** - Automated health checks every minute
-- **Auto-Recovery Actions** - Automatic service restart for unhealthy resources
-- **Live Dashboard** - React-based dashboard with 10-second auto-refresh
-- **Mock Data Mode** - Built-in mock services for cost-free development and testing
-- **Configuration-Driven** - Environment-based resource configuration
-- **Extensible Architecture** - Easy to add new service monitors
-- **REST API** - HTTP endpoints for health data access
-- **Responsive UI** - Mobile-friendly dashboard design
-
-## 🛠️ Tech Stack
-
-### Backend
-- **.NET 8** - Latest framework with isolated process model
-- **Azure Functions** - Serverless compute for monitoring logic
-- **Azure SDK** - ARM client libraries for resource management
-- **C# 12** - Modern language features
-
-### Frontend
-- **React 18** - UI framework with TypeScript
-- **Axios** - HTTP client for API calls
-- **Recharts** - Data visualization (ready for charts)
-- **CSS3** - Custom styling with responsive design
-
-### Azure Services Supported
-- App Services
-- Cosmos DB
-- Service Bus
-- Storage Accounts
-- Function Apps
-
-## 🚀 Getting Started
-
-### Prerequisites
-- .NET 8 SDK
-- Node.js 18+
-- Azure Functions Core Tools v4
-- Azure subscription (optional - can run with mock data)
-
-### Installation
-
-1. **Clone the repository**
 ```bash
 git clone https://github.com/Maxencejules/azure-resiliency-monitor.git
-cd azure-resiliency-monitor
+cd azure-resiliency-monitor/dashboard
+npm ci
+npm test
+npm run build
+npm run dev
 ```
 
-2. **Install backend dependencies**
+Open <http://localhost:5173/?demo=healthy>. Change the `demo` query parameter to
+`healthy`, `degraded`, `outage`, or `recovered` to inspect each state. These scenarios run in
+the browser and make no Azure calls. Open <http://localhost:5173/> for the live API.
+
+The dashboard polls every ten seconds, prevents overlapping requests, retains
+the last successful cards during refresh failures, and warns when `checkedAt`
+is older than two minutes. A newly fetched cached response can still contain
+stale observations. Response durations use numeric `responseTimeMs`; zero-valued
+metrics remain visible.
+
+## Build and test the backend
+
+Requires the .NET 10 SDK. From the repository root:
+
 ```bash
-dotnet restore
-dotnet build
+dotnet restore AzureResiliencyMonitor.Functions/AzureResiliencyMonitor.Functions.csproj
+dotnet restore AzureResiliencyMonitor.sln
+dotnet build AzureResiliencyMonitor.sln --no-restore
+dotnet test AzureResiliencyMonitor.sln --no-build --no-restore
 ```
 
-3. **Install frontend dependencies**
+The Functions application uses the isolated worker model. Tests exercise cached
+HTTP reads, repeated unhealthy checks, recovery cooldowns, failed and throwing
+recovery, concurrent checks, cancellation, and deterministic mocks. Dashboard
+tests cover loading, errors/retry, empty snapshots, stale observations, polling
+cleanup, malformed responses, numeric durations, and demos. GitHub Actions builds
+and tests both applications from a clean checkout.
+
+Azure adapter tests use the real SDK with an in-memory HTTP transport and a fake
+token. They verify ARM request paths, restart flags, failed reads/restarts, and
+cancellation during I/O, without contacting Azure.
+
+## Run the connected local demo
+
+Install Azure Functions Core Tools v4 and Azurite. Development mode requires no
+Azure login. Copy the configuration template:
+
 ```bash
-cd dashboard
-npm install
+# Bash; on Windows use Copy-Item with the same source and destination.
+cp AzureResiliencyMonitor.Functions/local.settings.example.json AzureResiliencyMonitor.Functions/local.settings.json
 ```
 
-### Running Locally
+Start Azurite from the repository root:
 
-1. **Start Azurite (Storage Emulator)**
 ```bash
-azurite
+azurite --location .local/azurite
 ```
 
-2. **Start Azure Functions** (new terminal)
+In a second terminal:
+
 ```bash
 cd AzureResiliencyMonitor.Functions
 func start
 ```
 
-3. **Start React Dashboard** (new terminal)
-```bash
-cd dashboard
-npm start
+In a third terminal, run `npm run dev` from `dashboard` and open
+<http://localhost:5173/>. The Vite server proxies `/api` to
+`http://127.0.0.1:7071`; use `VITE_API_PROXY_TARGET` to change that destination.
+For a deployed dashboard, set `VITE_API_BASE_URL` at build time and configure
+the API's authentication and allowed origins for that deployment.
+
+The first snapshot appears after the first scheduled check. An empty list on a
+new host means no observation has been collected yet.
+
+## Checks, recovery, and configuration
+
+Only the timer runs checks and evaluates recovery. `GET /api/health/current`
+reads the latest snapshot and never initiates a health check or restart.
+
+| Application setting | Default | Meaning |
+|---|---|---|
+| `AZURE_FUNCTIONS_ENVIRONMENT` | `Development` in the example | Development registers mocks; other environments use the App Service monitor |
+| `MonitoredResources` | Empty | Comma-separated IDs; development supplies three mocks when empty |
+| `RecoveryEnabled` | `false` | Explicitly enables restart requests for unhealthy resources |
+| `RecoveryCooldownSeconds` | `300` | Positive delay between attempts, including failures |
+| `AzureWebJobsStorage` | `UseDevelopmentStorage=true` in the example | Timer storage; use Azurite locally |
+
+Checks run once a minute. Recovery metadata includes `Disabled`, `Cooldown`,
+`Started`, and `Failed`. `Started` means the restart request was accepted; health
+remains unhealthy until a later check observes improvement. Degraded and unknown
+observations do not trigger recovery.
+
+Mock names ending in `/healthy`, `/degraded`, `/unhealthy`, or `/recovery-fails`
+produce fixed observations. Recovery for `/recovery-fails` returns failure.
+For example, enable recovery in a local demo with:
+
+```json
+"MonitoredResources": "mock://app/unhealthy,mock://app/recovery-fails",
+"RecoveryEnabled": "true",
+"RecoveryCooldownSeconds": "300"
 ```
 
-4. **Open browser**
-- Dashboard: http://localhost:3000
-- API Health: http://localhost:7071/api/health
-- Current Status: http://localhost:7071/api/health/current
+Snapshots and cooldowns are **process-local** and reset on host restart. Checks
+serialize within that process. This demo does not coordinate recovery across
+scaled-out hosts; production deployment needs durable coordination.
 
-## 🏗️ Architecture
+For real App Service checks, use an ARM resource ID such as
+`/subscriptions/{id}/resourceGroups/{group}/providers/Microsoft.Web/sites/{name}`
+and an identity available to `DefaultAzureCredential`. Start with read permissions
+and recovery disabled; restart permission is required when enabling recovery.
+Keep local settings untracked. Real Azure recovery and cloud deployment are
+outside the automated mock tests.
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│                 │     │                 │     │                 │
-│  React Dashboard│────▶│  Azure Functions│────▶│  Azure Resources│
-│                 │     │                 │     │                 │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-        │                       │                         │
-        │                       │                         │
-        ▼                       ▼                         ▼
-   [Browser UI]          [Timer Trigger]           [ARM API/Mock]
-                         [HTTP Triggers]
-```
+## API contract
 
-### Key Components
+| Endpoint | Behavior |
+|---|---|
+| `GET /api/health` | Basic host health |
+| `GET /api/health/current` | Array of cached observations; empty before the first check |
 
-- **HealthCheckService** - Orchestrates all monitoring operations
-- **ServiceMonitors** - Individual monitors for each Azure service type
-- **MockServiceMonitor** - Generates test data for development
-- **Timer Function** - Triggers health checks every minute
-- **API Functions** - HTTP endpoints for dashboard access
+Example observation:
 
-## 📊 Monitoring Capabilities
-
-| Service Type | Health Check | Auto-Recovery | Metrics |
-|-------------|--------------|---------------|---------|
-| App Service | ✅ | ✅ Restart | CPU, Memory, RPS |
-| Cosmos DB | ✅ | ✅ Failover Ready | Throughput, Latency |
-| Service Bus | 🔄 | 🔄 | Queue Length |
-| Storage | 🔄 | 🔄 | IOPS, Bandwidth |
-
-✅ Implemented | 🔄 Ready for Extension
-
-## 🔧 Configuration
-
-### Environment Variables (local.settings.json)
 ```json
 {
-  "Values": {
-    "AZURE_FUNCTIONS_ENVIRONMENT": "Development",
-    "MonitoredResources": "resource1,resource2",
-    "AzureWebJobsStorage": "UseDevelopmentStorage=true"
-  }
-}
-```
-
-### Adding Real Azure Resources
-```json
-"MonitoredResources": "/subscriptions/{id}/resourceGroups/{rg}/providers/Microsoft.Web/sites/{name}"
-```
-
-## 🧪 Development Mode
-
-The project includes a mock service monitor that generates realistic test data:
-- Random health statuses (Healthy, Degraded, Unhealthy)
-- Simulated CPU and memory metrics
-- Variable response times
-- No Azure costs
-
-## 📈 API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Basic health check |
-| `/api/health/current` | GET | Get current status of all monitored services |
-
-### Sample API Response
-```json
-{
-  "serviceName": "app-1",
-  "resourceId": "mock://subscription/test-sub/resourceGroups/test-rg/providers/Microsoft.Web/sites/app-1",
+  "serviceName": "unhealthy",
+  "resourceId": "mock://app/unhealthy",
   "serviceType": "AppService",
-  "status": "Healthy",
-  "message": "Mock status: Healthy",
-  "checkedAt": "2025-09-11T06:49:25.2142842Z",
-  "responseTime": "00:00:00.1105291",
-  "metadata": {
-    "mock": true,
-    "cpuUsage": 45,
-    "memoryUsage": 39,
-    "requestsPerSecond": 842
-  }
+  "status": "Unhealthy",
+  "message": "Deterministic mock: Unhealthy",
+  "checkedAt": "2026-09-29T12:00:00Z",
+  "responseTime": "00:00:00.1200000",
+  "responseTimeMs": 120,
+  "metadata": { "mock": true, "recoveryOutcome": "Disabled" }
 }
 ```
 
-## 🧩 Project Structure
+The duration string remains for compatibility. Use `responseTimeMs` for calculations.
 
-```
-azure-resiliency-monitor/
-├── AzureResiliencyMonitor.Core/          # Business logic and models
-│   ├── Interfaces/                       # Service contracts
-│   ├── Models/                           # Data models
-│   ├── Monitors/                         # Service-specific monitors
-│   └── Services/                         # Core services
-├── AzureResiliencyMonitor.Functions/     # Azure Functions
-│   ├── HealthCheckFunction.cs            # Timer trigger
-│   ├── HealthCheckApiFunction.cs         # HTTP endpoints
-│   └── Program.cs                        # DI configuration
-├── AzureResiliencyMonitor.Tests/         # Unit tests
-├── dashboard/                             # React frontend
-│   ├── src/
-│   │   ├── components/                   # React components
-│   │   └── types/                        # TypeScript definitions
-│   └── package.json
-└── AzureResiliencyMonitor.sln            # Solution file
-```
+## Structure
 
-## 🚢 Deployment
+- `AzureResiliencyMonitor.Core`: observations, policy, orchestration, real and mock monitors.
+- `AzureResiliencyMonitor.Functions`: timer, HTTP endpoints, dependency/configuration setup.
+- `AzureResiliencyMonitor.Tests`: backend and HTTP contract regressions.
+- `dashboard`: React/TypeScript app, Vite build, and Vitest tests.
 
-### Azure Functions Deployment
-```bash
-func azure functionapp publish <function-app-name>
-```
-
-### Dashboard Deployment (Azure Static Web Apps)
-```bash
-cd dashboard
-npm run build
-# Deploy build folder to Azure Static Web Apps
-```
-
-## 🧪 Testing
-
-### Backend Tests
-```bash
-dotnet test
-```
-
-### Frontend Tests
-```bash
-cd dashboard
-npm test
-```
-
-## 📝 Future Enhancements
-
-- [ ] Add SignalR for real-time WebSocket updates
-- [ ] Implement data persistence with Cosmos DB
-- [ ] Add email/Teams notifications for critical alerts
-- [ ] Create Terraform templates for infrastructure
-- [ ] Add Application Insights integration
-- [ ] Implement custom alert rules
-- [ ] Add historical trending charts
-- [ ] Support for more Azure service types
-- [ ] Add authentication with Azure AD
-- [ ] Implement role-based access control
-- [ ] Add export functionality for reports
-- [ ] Create mobile app version
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the project
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 👤 Author
-
-**Maxence Jules**
-- GitHub: Maxencejules(https://github.com/Maxencejules)
-- LinkedIn: Maxence Jules (https://linkedin.com/in/julesmax)
-- Email: Powe840@gmail.com
-
-## 🙏 Acknowledgments
-
-- Built as a portfolio project to demonstrate Azure monitoring capabilities
-- Designed following Microsoft best practices for cloud-native applications
-- Implements enterprise patterns for production readiness
-
-## 📞 Support
-
-For support, email powe840@gmail.com or open an issue in the GitHub repository.
-
----
-
-**Note**: This is a demonstration project using mock data for development. For production use, configure with real Azure resource IDs and appropriate authentication.
+Author: [Maxence Jules](https://github.com/Maxencejules).
+License: MIT.
+The [.NET isolated worker guide](https://learn.microsoft.com/azure/azure-functions/dotnet-isolated-process-guide)
+documents the Functions runtime and deployment model.
