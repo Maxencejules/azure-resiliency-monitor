@@ -29,16 +29,20 @@ public sealed class AppServiceMonitorTests
         Assert.Equal(ServiceType.AppService, provider.GetRequiredService<AppServiceMonitor>().ServiceType);
     }
 
-    [Fact]
-    public async Task RunningAppUsesAuthenticatedArmReadAndReportsHealthy()
+    [Theory]
+    [InlineData("live-app-name", "live-app-name")]
+    [InlineData(null, "demo-app")]
+    [InlineData(" ", "demo-app")]
+    public async Task RunningAppUsesAuthenticatedArmReadAndReportsHealthy(string? name, string expectedName)
     {
-        using var handler = new FakeHandler((_, _) => Task.FromResult(Site("Running")));
+        using var handler = new FakeHandler((_, _) => Task.FromResult(Site("Running", name)));
         using var client = new HttpClient(handler);
         var monitor = Create(client);
 
         var result = await monitor.CheckHealthAsync(Resource);
 
         Assert.Equal(HealthStatus.Healthy, result.Status);
+        Assert.Equal(expectedName, result.ServiceName);
         Assert.Equal("Running", result.Metadata["state"]);
         Assert.True(result.ResponseTime >= TimeSpan.Zero);
         AssertRead(Assert.Single(handler.Requests));
@@ -79,6 +83,7 @@ public sealed class AppServiceMonitorTests
         var result = await Create(client).CheckHealthAsync(Resource);
 
         Assert.Equal(HealthStatus.Unknown, result.Status);
+        Assert.Equal("demo-app", result.ServiceName);
         Assert.Contains("Access denied", result.Message);
         AssertRead(Assert.Single(handler.Requests));
     }
@@ -155,10 +160,10 @@ public sealed class AppServiceMonitorTests
             new ArmClient(credential, Subscription, options));
     }
 
-    private static HttpResponseMessage Site(string state) => Json(HttpStatusCode.OK, JsonSerializer.Serialize(new
+    private static HttpResponseMessage Site(string state, string? name = "demo-app") => Json(HttpStatusCode.OK, JsonSerializer.Serialize(new
     {
         id = Resource,
-        name = "demo-app",
+        name,
         type = "Microsoft.Web/sites",
         location = "westeurope",
         properties = new { state }

@@ -33,7 +33,7 @@ public class AppServiceMonitor : IServiceMonitor
         var stopwatch = Stopwatch.StartNew();
         var result = new HealthCheckResult
         {
-            ServiceName = "App Service",
+            ServiceName = resourceId.TrimEnd('/').Split('/').Last(),
             ResourceId = resourceId,
             ServiceType = ServiceType.AppService,
             CheckedAt = DateTime.UtcNow
@@ -43,6 +43,9 @@ public class AppServiceMonitor : IServiceMonitor
         {
             var resource = _armClient.GetWebSiteResource(new ResourceIdentifier(resourceId));
             var webSite = await resource.GetAsync(cancellationToken);
+
+            var name = webSite.Value.Data.Name;
+            if (!string.IsNullOrWhiteSpace(name)) result.ServiceName = name;
             
             result.Status = webSite.Value.Data.State == "Running" 
                 ? HealthStatus.Healthy 
